@@ -1,3 +1,4 @@
+/*Includes*/
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -7,17 +8,30 @@
 #include <unistd.h>
 #include <wiringPi.h>
 
+
+/*Function to display error which takes message as an arguement*/
 void error(char* msg){
   perror(msg);
   exit(1);
 }
 
+/*This function encodes the packet by adding number 5 to every element*/
+void encode_packet(char *buffer){
+  int i;
+  for(i=0;i<12;i++){
+    *(buffer+i)=*(buffer+i)+5;
+  }
+}
+
+
 int main( int argc, char* argv[]){
   
   /*Variables*/
-  int sockfd,newsockfd, portno, clilen;
-  int buffer[256];
-  struct sockaddr_in serv_addr, cli_addr;
+  int sock,newsock, portno, client_len;
+  char *touch=NULL;
+  char *piezo=NULL;
+  char buffer[100];
+  struct sockaddr_in server_addr, client_addr;
   int n;
   
   uint8_t Touch_Pin = 8;
@@ -36,6 +50,7 @@ int main( int argc, char* argv[]){
   if(wiringPiSetup() == -1)
     return 1;
 
+  /*Set pins as input and output*/
   pinMode(Touch_Pin, INPUT);
   pinMode(LED_Pin, OUTPUT);
   pinMode(IN1_Pin, OUTPUT);
@@ -50,50 +65,80 @@ int main( int argc, char* argv[]){
     fprintf(stderr,"Error, no port provided\n");
     exit(1);
   }
-  /*Create socket*/
+  
 
-  sockfd= socket(AF_INET, SOCK_STREAM, 0);
-  if(sockfd<0){
+  /*Create socket*/
+  sock= socket(AF_INET, SOCK_STREAM, 0);
+  
+  /*If sock returns -1, there was some error*/
+  if(sock<0){
     error("Failed to create socket");
   }
 
-  bzero((char*)&serv_addr, sizeof(serv_addr));
+  /*Zero out the value*/
+  bzero((char*)&server_addr, sizeof(server_addr));
 
+  /*Take port number as command line argument*/
   portno=atoi(argv[1]);
   
-  serv_addr.sin_family = AF_INET;
-  serv_addr.sin_addr.s_addr = INADDR_ANY;
-  serv_addr.sin_port=htons(portno);
+  server_addr.sin_family = AF_INET;
+  server_addr.sin_addr.s_addr = INADDR_ANY;
+  server_addr.sin_port=htons(portno);
 
 
   /*bind*/
-  if(bind(sockfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr))<0){
+  if(bind(sock, (struct sockaddr*)&server_addr, sizeof(server_addr))<0){
     error("bind failed");
   }
   
   /*Listen*/
-  listen(sockfd,5);
+  listen(sock,5);
  
-  clilen=sizeof(cli_addr);
 
-  newsockfd=accept(sockfd,(struct sockaddr*)&cli_addr, &clilen);
+  client_len=sizeof(client_addr);
 
-  if(newsockfd<0){
+  /*accept connection*/
+  newsock=accept(sock,(struct sockaddr*)&client_addr, &client_len);
+
+  /*If value returned is -1 then there is some error in accept*/
+  if(newsock<0){
     error("Error on accept");
   }
  
   while(1){
 
     printf("Sending Touch Sensor Data \n");
-    bzero(buffer,256);
+   
+    /*zero out the value of buffer at start of every transfer*/
+    bzero(buffer,100);
+
+    /*Read the value of touch sensor and piezo sensor*/
     Touch_Read = digitalRead(Touch_Pin);
-    buffer[0]=Touch_Read;
     Piezo_Value= digitalRead(Piezo_Pin);
-    buffer[1]= Piezo_Value;
-    n=write(newsockfd,buffer,255);
+   
+ 
+    if(Piezo_Value==1){
+     piezo="PIEZO1";
+    }
+    else{
+     piezo="PIEZO0";
+    }
+       
     if (Touch_Read == 1){
+
+      touch="TOUCH1";
+      strcpy(buffer,piezo);
+      strcat(buffer,touch);
+
+      /*Encode the packet before transfer*/ 
+      encode_packet((char*)&buffer);
+
+      /*Write the packet*/
+      n=write(newsock,buffer,100);     
+      
       digitalWrite(LED_Pin, 1);
       
+      /*Stepper Motor*/
       for(i=0; i<j; i++){
 
         digitalWrite(IN1_Pin,HIGH);
@@ -130,15 +175,27 @@ int main( int argc, char* argv[]){
     }
     
  
-   else{
+    else{
+      touch="TOUCH0";
+      strcpy(buffer,piezo);
+      strcat(buffer,touch);
+
+      /*Encode the packet before transfer*/
+      encode_packet((char*)&buffer);
+
+      /*Write the packet*/
+      n=write(newsock,buffer,100);
+
       digitalWrite(LED_Pin, 0);
   
-  }
+    } 
 
-  if(n<0){
-    error("Error writing to socket");
-  }
-  delay(2000);
+
+    if(n<0){
+      error("Error writing to socket");
+    }
+  
+  delay(3000);
   }
   return 0;  
 }
